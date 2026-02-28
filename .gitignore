@@ -20,3 +20,7 @@ Thumbs.db
 # Generated files
 src/version_gen.h
 src/version_gen64.h
+
+# CodeQL artifacts
+_codeql_detected_source_root
+*/_codeql_build_dir/
