@@ -343,24 +343,22 @@ inline bool IntersectsAll(
         if (0 !=
             _mm_movemask_ps(
                 _mm_and_ps(
-                    _mm_cmp_ps(Denoms, Zero, _CMP_EQ_OQ),
-                    _mm_cmp_ps(Nums, Zero, _CMP_LE_OQ))))
+                    _mm_cmpeq_ps(Denoms, Zero),
+                    _mm_cmple_ps(Nums, Zero))))
         {
             return false;
         }
         __m128 Times = _mm_div_ps(Nums, Denoms);
-        __m128 PositiveMask = _mm_cmp_ps(Denoms, Zero, _CMP_GT_OS);
-        __m128 NegativeMask = _mm_cmp_ps(Denoms, Zero, _CMP_LT_OS);
-        EnterTimes = _mm_blendv_ps(
-            EnterTimes,
-            _mm_max_ps(EnterTimes, Times),
-            NegativeMask);
-        ExitTimes = _mm_blendv_ps(
-            ExitTimes,
-            _mm_min_ps(ExitTimes, Times),
-            PositiveMask);
+        __m128 PositiveMask = _mm_cmpgt_ps(Denoms, Zero);
+        __m128 NegativeMask = _mm_cmplt_ps(Denoms, Zero);
+        EnterTimes = _mm_or_ps(
+            _mm_andnot_ps(NegativeMask, EnterTimes),
+            _mm_and_ps(_mm_max_ps(EnterTimes, Times), NegativeMask));
+        ExitTimes = _mm_or_ps(
+            _mm_andnot_ps(PositiveMask, ExitTimes),
+            _mm_and_ps(_mm_min_ps(ExitTimes, Times), PositiveMask));
         if (0 !=
-            _mm_movemask_ps(_mm_cmp_ps(EnterTimes, ExitTimes, _CMP_GT_OS)))
+            _mm_movemask_ps(_mm_cmpgt_ps(EnterTimes, ExitTimes)))
         {
             return false;
         }
