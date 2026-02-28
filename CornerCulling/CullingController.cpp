@@ -5,9 +5,10 @@
 
 CullingController::CullingController() {}
 
-void CullingController::BeginPlay(char* mapName)
+void CullingController::BeginPlay(const char* mapName)
 {
-    MapName = mapName;
+    strncpy(MapName, mapName, sizeof(MapName) - 1);
+    MapName[sizeof(MapName) - 1] = '\0';
     Cuboids.clear();
     memset(
         CuboidCaches,

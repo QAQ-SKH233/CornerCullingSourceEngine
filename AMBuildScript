@@ -1,449 +1,376 @@
 # vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
-import os, sys
+import os, json, re, subprocess
+from ambuild2.frontend.v2_2.cpp.builders import TargetSuffix
 
-# Simple extensions do not need to modify this file.
+def additionalLibs(context, binary, sdk):
+  return []
 
-class SDK(object):
-  def __init__(self, sdk, ext, aDef, name, platform, dir):
-    self.folder = 'hl2sdk-' + dir
-    self.envvar = sdk
-    self.ext = ext
-    self.code = aDef
-    self.define = name
-    self.platform = platform
-    self.name = dir
-    self.path = None # Actual path
+def additionalDefines(context, binary, sdk):
+  return []
 
-WinOnly = ['windows']
-WinLinux = ['windows', 'linux']
-WinLinuxMac = ['windows', 'linux', 'mac']
+def additionalIncludes(context, binary, sdk):
+  return []
 
-PossibleSDKs = {
-  'episode1':  SDK('HL2SDK', '1.ep1', '1', 'EPISODEONE', WinLinux, 'episode1'),
-  'ep2':  SDK('HL2SDKOB', '2.ep2', '3', 'ORANGEBOX', WinLinux, 'orangebox'),
-  'css':  SDK('HL2SDKCSS', '2.css', '6', 'CSS', WinLinuxMac, 'css'),
-  'hl2dm':  SDK('HL2SDKHL2DM', '2.hl2dm', '7', 'HL2DM', WinLinuxMac, 'hl2dm'),
-  'dods': SDK('HL2SDKDODS', '2.dods', '8', 'DODS', WinLinuxMac, 'dods'),
-  'sdk2013': SDK('HL2SDK2013', '2.sdk2013', '9', 'SDK2013', WinLinuxMac, 'sdk2013'),
-  'tf2':  SDK('HL2SDKTF2', '2.tf2', '11', 'TF2', WinLinuxMac, 'tf2'),
-  'l4d':  SDK('HL2SDKL4D', '2.l4d', '12', 'LEFT4DEAD', WinLinuxMac, 'l4d'),
-  'nucleardawn': SDK('HL2SDKND', '2.nd', '13', 'NUCLEARDAWN', WinLinuxMac, 'nucleardawn'),
-  'l4d2': SDK('HL2SDKL4D2', '2.l4d2', '15', 'LEFT4DEAD2', WinLinuxMac, 'l4d2'),
-  'darkm':  SDK('HL2SDK-DARKM', '2.darkm', '2', 'DARKMESSIAH', WinOnly, 'darkm'),
-  'swarm':  SDK('HL2SDK-SWARM', '2.swarm', '16', 'ALIENSWARM', WinOnly, 'swarm'),
-  'bgt':  SDK('HL2SDK-BGT', '2.bgt', '4', 'BLOODYGOODTIME', WinOnly, 'bgt'),
-  'eye':  SDK('HL2SDK-EYE', '2.eye', '5', 'EYE', WinOnly, 'eye'),
-  'csgo': SDK('HL2SDKCSGO', '2.csgo', '21', 'CSGO', WinLinuxMac, 'csgo'),
-  'portal2':  SDK('HL2SDKPORTAL2', '2.portal2', '17', 'PORTAL2', [], 'portal2'),
-  'blade':  SDK('HL2SDKBLADE', '2.blade', '18', 'BLADE', WinLinux, 'blade'),
-  'insurgency':  SDK('HL2SDKINSURGENCY', '2.insurgency', '19', 'INSURGENCY', WinLinuxMac, 'insurgency'),
-  'contagion':  SDK('HL2SDKCONTAGION', '2.contagion', '14', 'CONTAGION', WinOnly, 'contagion'),
-  'bms':  SDK('HL2SDKBMS', '2.bms', '10', 'BMS', WinLinux, 'bms'),
-  'doi':  SDK('HL2SDKDOI', '2.doi', '20', 'DOI', WinLinuxMac, 'doi'),
-}
+def getGitHeadPath():
+  curr_source = builder.currentSourcePath
+  direct_head = os.path.join(curr_source, '.git', 'HEAD')
+  if not os.path.exists(direct_head):
+    return (None, None)
 
-def ResolveEnvPath(env, folder):
+  git_head_path = None
+  with open(direct_head, 'r') as fp:
+    head_contents = fp.read().strip()
+    if re.search('^[a-fA-F0-9]{40}$', head_contents):
+      git_head_path = direct_head
+    else:
+      git_state = head_contents.split(':')[1].strip()
+      git_head_path = os.path.join(curr_source, '.git', git_state)
+      if not os.path.exists(git_head_path):
+        git_head_path = direct_head
+
+  return (direct_head, git_head_path)
+
+def runAndReturn(argv):
+  p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd = builder.currentSourcePath)
+  output, ignored = p.communicate()
+  rval = p.poll()
+  if rval:
+    return None
+  text = output.decode('utf8')
+  return text.strip()
+
+def resolveEnvPath(env, folder = None):
   if env in os.environ:
     path = os.environ[env]
     if os.path.isdir(path):
       return path
-    return None
-
-  head = os.getcwd()
-  oldhead = None
-  while head != None and head != oldhead:
-    path = os.path.join(head, folder)
-    if os.path.isdir(path):
-      return path
-    oldhead = head
-    head, tail = os.path.split(head)
-
+  elif folder is not None:
+    head = os.getcwd()
+    oldhead = None
+    while head != None and head != oldhead:
+      path = os.path.join(head, folder)
+      if os.path.isdir(path):
+        return path
+      oldhead = head
+      head, tail = os.path.split(head)
   return None
 
-def Normalize(path):
-  return os.path.abspath(os.path.normpath(path))
+def resolveMMSRoot():
+  prenormalized_path = None
+  if builder.options.mms_path:
+    prenormalized_path = builder.options.mms_path
+  else:
+    prenormalized_path = resolveEnvPath('MMSOURCE20', 'mmsource-2.0')
+    if not prenormalized_path:
+      prenormalized_path = resolveEnvPath('MMSOURCE_DEV', 'metamod-source')
+    if not prenormalized_path:
+      prenormalized_path = resolveEnvPath('MMSOURCE_DEV', 'mmsource-central')
+  if not prenormalized_path or not os.path.isdir(prenormalized_path):
+    raise Exception('Could not find a source copy of Metamod:Source')
+  
+  return os.path.abspath(os.path.normpath(prenormalized_path))
 
-class ExtensionConfig(object):
+mms_root = resolveMMSRoot()
+
+def resolveHL2SDKManifestsRoot():
+  prenormalized_path = None
+  if builder.options.hl2sdk_manifests:
+    prenormalized_path = builder.options.hl2sdk_manifests
+  else:
+    prenormalized_path = resolveEnvPath('HL2SDKMANIFESTS', 'hl2sdk-manifests')
+  if not prenormalized_path or not os.path.isdir(prenormalized_path):
+    raise Exception('Could not find a source copy of HL2SDK manifests')
+  
+  return os.path.abspath(os.path.normpath(prenormalized_path))
+
+hl2sdk_manifests_root = resolveHL2SDKManifestsRoot()
+
+SdkHelpers = builder.Eval(os.path.join(hl2sdk_manifests_root, 'SdkHelpers.ambuild'), {
+  'Project': 'metamod'
+})
+
+class MMSPluginConfig(object):
   def __init__(self):
+    self.sdk_manifests = []
     self.sdks = {}
+    self.sdk_targets = []
     self.binaries = []
-    self.extensions = []
-    self.generated_headers = None
-    self.mms_root = None
-    self.sm_root = None
-    builder.options.debug = '0'
-    builder.options.opt = '1'
+    self.mms_root = mms_root
+    self.version_header_deps = []
+    self.versionlib_deps = dict()
+    self.all_targets = []
+    self.target_archs = set()
 
-  @property
-  def tag(self):
-    if builder.options.debug == '1':
-      return 'Debug'
-    return 'Release'
+    self.metadata = {
+      'name': 'culling',
+      'alias': 'culling',
+      'display_name': 'Culling',
+      'description': 'Improved Fog of War - Anti-wallhack occlusion culling for CS2',
+      'author': 'Andrew H.',
+      'url': 'https://github.com/87andrewh/CornerCullingSourceEngine',
+      'log_tag': 'CULLING',
+      'license': 'MIT',
+      'version': '2.0.0.{{git-shorthash}}',
+    }
+
+    if builder.options.targets:
+      target_archs = builder.options.targets.split(',')
+    else:
+      target_archs = ['x86_64']
+
+    for arch in target_archs:
+        try:
+            cxx = builder.DetectCxx(target_arch = arch)
+            self.target_archs.add(cxx.target.arch)
+        except Exception as e:
+            if builder.options.targets:
+                raise
+            print('Skipping target {}: {}'.format(arch, e))
+            continue
+        self.all_targets.append(cxx)
+
+    if not self.all_targets:
+        raise Exception('No suitable C/C++ compiler was found.')
+
+  def findSdkPath(self, sdk_name):
+    dir_name = 'hl2sdk-{}'.format(sdk_name)
+    hl2sdk_root = builder.options.hl2sdk_root
+    if not hl2sdk_root:
+      hl2sdk_root = resolveEnvPath('HL2SDKROOT')
+
+    if hl2sdk_root:
+      sdk_path = os.path.abspath(os.path.normpath(os.path.join(hl2sdk_root, dir_name)))
+      if os.path.exists(sdk_path):
+        return sdk_path
+    return resolveEnvPath('HL2SDK{}'.format(sdk_name.upper()), dir_name)
 
   def detectSDKs(self):
-    sdk_list = builder.options.sdks.split(',')
-    use_all = sdk_list[0] == 'all'
-    use_present = sdk_list[0] == 'present'
+    sdk_list = [s for s in builder.options.sdks.split(',') if s]
+    SdkHelpers.find_sdk_path = self.findSdkPath
+    SdkHelpers.findSdks(builder, self.all_targets, sdk_list)
 
-    for sdk_name in PossibleSDKs:
-      sdk = PossibleSDKs[sdk_name]
-      if builder.target_platform in sdk.platform:
-        if builder.options.hl2sdk_root:
-          sdk_path = os.path.join(builder.options.hl2sdk_root, sdk.folder)
-        else:
-          sdk_path = ResolveEnvPath(sdk.envvar, sdk.folder)
-        if sdk_path is None or not os.path.isdir(sdk_path):
-          if use_all or sdk_name in sdk_list:
-            raise Exception('Could not find a valid path for {0}'.format(sdk.envvar))
-          continue
-        if use_all or use_present or sdk_name in sdk_list:
-          sdk.path = Normalize(sdk_path)
-          self.sdks[sdk_name] = sdk
+    self.sdk_manifests = SdkHelpers.sdk_manifests
+    self.sdks = SdkHelpers.sdks
+    self.sdk_targets = SdkHelpers.sdk_targets
 
-    if len(self.sdks) < 1:
+    if not self.sdk_targets:
       raise Exception('At least one SDK must be available.')
 
-    if builder.options.sm_path:
-      self.sm_root = builder.options.sm_path
-    else:
-      self.sm_root = ResolveEnvPath('SOURCEMOD18', 'sourcemod-1.8')
-      if not self.sm_root:
-        self.sm_root = ResolveEnvPath('SOURCEMOD', 'sourcemod')
-      if not self.sm_root:
-        self.sm_root = ResolveEnvPath('SOURCEMOD_DEV', 'sourcemod-central')
-
-    if not self.sm_root or not os.path.isdir(self.sm_root):
-      raise Exception('Could not find a source copy of SourceMod')
-    self.sm_root = Normalize(self.sm_root)
-
-    if builder.options.mms_path:
-      self.mms_root = builder.options.mms_path
-    else:
-      self.mms_root = ResolveEnvPath('MMSOURCE110', 'mmsource-1.10')
-      if not self.mms_root:
-        self.mms_root = ResolveEnvPath('MMSOURCE', 'metamod-source')
-      if not self.mms_root:
-        self.mms_root = ResolveEnvPath('MMSOURCE_DEV', 'mmsource-central')
-
-    if not self.mms_root or not os.path.isdir(self.mms_root):
-      raise Exception('Could not find a source copy of Metamod:Source')
-    self.mms_root = Normalize(self.mms_root)
+  def configurePluginMetadata(self):
+    metadata_path = os.path.join(builder.currentSourcePath, 'plugin-metadata.json')
+    if os.path.exists(metadata_path):
+      with open(metadata_path, 'r') as fp:
+        metadata = json.load(fp)
+        for key in metadata:
+          self.metadata[key] = metadata[key]
 
   def configure(self):
-    cxx = builder.DetectCompilers()
+    for cxx in self.all_targets:
+      self.configureCxx(cxx)
 
-    if cxx.like('gcc'):
-      self.configure_gcc(cxx)
-    elif cxx.vendor == 'msvc':
-      self.configure_msvc(cxx)
+  def addVersioning(self, cxx):
+    if cxx.target.arch == 'x86_64':
+      target_suffix = '64'
+    else:
+      target_suffix = ''
 
-    # Optimizaiton
+    (direct_head, git_head_path) = getGitHeadPath()
+
+    defines = {
+      'PLUGIN_DISPLAY_NAME': self.metadata['display_name'],
+      'PLUGIN_AUTHOR': self.metadata['author'],
+      'PLUGIN_DESCRIPTION': self.metadata['description'],
+      'PLUGIN_URL': self.metadata['url'],
+      'PLUGIN_LOGTAG': self.metadata['log_tag'],
+      'PLUGIN_LICENSE': self.metadata['license'],
+    }
+
+    version_string = self.metadata['version']
+    git_shorthash = runAndReturn(['git', 'rev-parse', '--short', 'HEAD'])
+    if git_shorthash:
+      version_string = version_string.replace('{{git-shorthash}}', git_shorthash)
+    else:
+      version_string = version_string.replace('{{git-shorthash}}', 'unknown')
+
+    defines['PLUGIN_FULL_VERSION'] = version_string
+
+    header_text = '#pragma once\n\n'
+    for name, value in defines.items():
+      header_text += '#define {} "{}"\n'.format(name, value)
+
+    version_gen = builder.AddOutputFile(
+      os.path.join('src', 'version_gen{}.h'.format(target_suffix)),
+      header_text.encode('utf8')
+    )
+
+    self.version_header_deps += [version_gen]
+
+  def configureCxx(self, cxx):
+    if cxx.behavior == 'gcc':
+      cxx.defines += [
+        'stricmp=strcasecmp',
+        '_stricmp=strcasecmp',
+        '_snprintf=snprintf',
+        '_vsnprintf=vsnprintf',
+        'HAVE_STDINT_H',
+        'GNUC',
+      ]
+      cxx.cflags += [
+        '-pipe',
+        '-fno-strict-aliasing',
+        '-Wall',
+        '-Wno-sign-compare',
+        '-Wno-uninitialized',
+        '-Wno-unused',
+        '-Wno-switch',
+        '-msse',
+        '-fPIC',
+      ]
+
+      cxx.cxxflags += ['-std=c++17']
+      if (cxx.version >= 'gcc-4.0') or cxx.family == 'clang':
+        cxx.cflags += ['-fvisibility=hidden']
+        cxx.cxxflags += ['-fvisibility-inlines-hidden']
+      cxx.cxxflags += [
+        '-fno-exceptions',
+        '-fno-threadsafe-statics',
+        '-Wno-non-virtual-dtor',
+        '-Wno-overloaded-virtual',
+        '-Wno-register',
+      ]
+      if (cxx.version >= 'gcc-4.7' or cxx.family == 'clang'):
+        cxx.cxxflags += ['-Wno-delete-non-virtual-dtor']
+      if cxx.family == 'gcc':
+        cxx.cflags += ['-mfpmath=sse']
+      if cxx.family == 'clang':
+        cxx.cxxflags += ['-Wno-implicit-exception-spec-mismatch']
+        if cxx.version >= 'clang-3.9':
+          cxx.cxxflags += ['-Wno-expansion-to-defined']
+        if cxx.version >= 'clang-3.6':
+          cxx.cxxflags += ['-Wno-inconsistent-missing-override']
+        if cxx.version >= 'clang-3.4':
+          cxx.cxxflags += ['-Wno-deprecated-register']
+        else:
+          cxx.cxxflags += ['-Wno-deprecated']
+      
+      if cxx.version >= 'clang-10.0':
+        cxx.cflags += [
+          '-Wno-implicit-int-float-conversion',
+          '-Wno-tautological-overlap-compare',
+        ]
+
+    elif cxx.like('msvc'):
+      if builder.options.debug == '1':
+        cxx.cflags += ['/MTd']
+        cxx.linkflags += ['/NODEFAULTLIB:libcmt']
+      else:
+        cxx.cflags += ['/MT']
+      cxx.defines += [
+        '_CRT_SECURE_NO_DEPRECATE',
+        '_CRT_SECURE_NO_WARNINGS',
+        '_CRT_NONSTDC_NO_DEPRECATE',
+      ]
+      cxx.cflags += [
+        '/W3',
+        '/Zi',
+        '/std:c++17',
+      ]
+      cxx.cxxflags += ['/TP']
+      
+      cxx.linkflags += [
+        '/SUBSYSTEM:WINDOWS',
+        'kernel32.lib',
+        'user32.lib',
+        'gdi32.lib',
+        'winspool.lib',
+        'comdlg32.lib',
+        'advapi32.lib',
+        'shell32.lib',
+        'ole32.lib',
+        'oleaut32.lib',
+        'uuid.lib',
+        'odbc32.lib',
+        'odbccp32.lib',
+      ]
+
+    # Optimization
     if builder.options.opt == '1':
       cxx.defines += ['NDEBUG']
+      if cxx.behavior == 'gcc':
+        cxx.cflags += ['-O3']
+      elif cxx.behavior == 'msvc':
+        cxx.cflags += ['/Ox', '/Zo']
+        cxx.linkflags += ['/OPT:ICF', '/OPT:REF']
 
     # Debugging
     if builder.options.debug == '1':
       cxx.defines += ['DEBUG', '_DEBUG']
+      if cxx.behavior == 'gcc':
+        cxx.cflags += ['-g3']
+      elif cxx.behavior == 'msvc':
+        cxx.cflags += ['/Od', '/RTC1']
+
+    if cxx.behavior == 'gcc':
+      cxx.cflags += ['-fno-omit-frame-pointer']
+    elif cxx.behavior == 'msvc':
+      cxx.cflags += ['/Oy-']
 
     # Platform-specifics
-    if builder.target_platform == 'linux':
-      self.configure_linux(cxx)
-    elif builder.target_platform == 'mac':
-      self.configure_mac(cxx)
-    elif builder.target_platform == 'windows':
-      self.configure_windows(cxx)
+    if cxx.target.platform == 'linux':
+      cxx.defines += ['LINUX', '_LINUX', 'POSIX', '_FILE_OFFSET_BITS=64']
+      if cxx.family == 'gcc':
+        cxx.linkflags += ['-static-libgcc']
+      elif cxx.family == 'clang':
+        cxx.linkflags += ['-lgcc_eh']
+      cxx.linkflags += ['-static-libstdc++']
+    elif cxx.target.platform == 'windows':
+      cxx.defines += ['WIN32', '_WINDOWS']
 
-    # Finish up.
-    cxx.includes += [
-      os.path.join(self.sm_root, 'public'),
-    ]
+  def Library(self, cxx, name):
+    binary = cxx.Library(name)
+    return binary
+  
+  def HL2Library(self, context, compiler, name, sdk):
+    binary = self.Library(compiler, name)
+    mms_core_path = os.path.join(self.mms_root, 'core')
+    cxx = binary.compiler
+    
+    self.addVersioning(cxx)
 
-  def configure_gcc(self, cxx):
-    cxx.defines += [
-      'stricmp=strcasecmp',
-      '_stricmp=strcasecmp',
-      '_snprintf=snprintf',
-      '_vsnprintf=vsnprintf',
-      'HAVE_STDINT_H',
-      'GNUC',
-    ]
-    cxx.cflags += [
-      '-pipe',
-      '-fno-strict-aliasing',
-      '-Wall',
-      '-Wno-unused',
-      '-Wno-switch',
-      '-Wno-array-bounds',
-      '-mavx',
-      '-m32',
-      '-fvisibility=hidden',
-    ]
-    cxx.cxxflags += [
-      '-std=c++14',
-      '-fno-exceptions',
-      '-fno-threadsafe-statics',
-      '-Wno-non-virtual-dtor',
-      '-Wno-overloaded-virtual',
-      '-fvisibility-inlines-hidden',
-    ]
-    cxx.linkflags += ['-m32']
-
-    have_gcc = cxx.vendor == 'gcc'
-    have_clang = cxx.vendor == 'clang'
-    if cxx.version >= 'clang-3.6':
-      cxx.cxxflags += ['-Wno-inconsistent-missing-override']
-    if have_clang or (cxx.version >= 'gcc-4.6'):
-      cxx.cflags += ['-Wno-narrowing']
-    if have_clang or (cxx.version >= 'gcc-4.7'):
-      cxx.cxxflags += ['-Wno-delete-non-virtual-dtor']
-    if cxx.version >= 'gcc-4.8':
-      cxx.cflags += ['-Wno-unused-result']
-
-    if have_clang:
-      cxx.cxxflags += ['-Wno-implicit-exception-spec-mismatch']
-      if cxx.version >= 'apple-clang-5.1' or cxx.version >= 'clang-3.4':
-        cxx.cxxflags += ['-Wno-deprecated-register']
-      else:
-        cxx.cxxflags += ['-Wno-deprecated']
-      cxx.cflags += ['-Wno-sometimes-uninitialized']
-
-    if have_gcc:
-      cxx.cflags += ['-mfpmath=sse']
-
-    if builder.options.opt == '1':
-      cxx.cflags += ['-O3']
-
-  def configure_msvc(self, cxx):
-    if builder.options.debug == '1':
-      cxx.cflags += ['/MTd']
-      cxx.linkflags += ['/NODEFAULTLIB:libcmt']
-    else:
-      cxx.cflags += ['/MT']
-    cxx.defines += [
-      '_CRT_SECURE_NO_DEPRECATE',
-      '_CRT_SECURE_NO_WARNINGS',
-      '_CRT_NONSTDC_NO_DEPRECATE',
-      '_ITERATOR_DEBUG_LEVEL=0',
-    ]
-    cxx.cflags += [
-      '/W3',
-    ]
-    cxx.cxxflags += [
-      '/EHsc',
-      '/GR-',
-      '/TP',
-    ]
-    cxx.linkflags += [
-      '/MACHINE:X86',
-      'kernel32.lib',
-      'user32.lib',
-      'gdi32.lib',
-      'winspool.lib',
-      'comdlg32.lib',
-      'advapi32.lib',
-      'shell32.lib',
-      'ole32.lib',
-      'oleaut32.lib',
-      'uuid.lib',
-      'odbc32.lib',
-      'odbccp32.lib',
-    ]
-
-    if builder.options.opt == '1':
-      cxx.cflags += ['/Ox', '/Zo']
-      cxx.linkflags += ['/OPT:ICF', '/OPT:REF']
-
-    if builder.options.debug == '1':
-      cxx.cflags += ['/Od', '/RTC1']
-
-    # This needs to be after our optimization flags which could otherwise disable it.
-    # Don't omit the frame pointer.
-    cxx.cflags += ['/Oy-']
-
-  def configure_linux(self, cxx):
-    cxx.defines += ['_LINUX', 'POSIX']
-    cxx.linkflags += ['-Wl,--exclude-libs,ALL', '-lm']
-    if cxx.vendor == 'gcc':
-      cxx.linkflags += ['-static-libgcc']
-    if cxx.vendor == 'clang':
-      cxx.linkflags += ['-lgcc_eh']
-
-  def configure_mac(self, cxx):
-    cxx.defines += ['OSX', '_OSX', 'POSIX']
-    cxx.cflags += ['-mmacosx-version-min=10.5']
-    cxx.linkflags += [
-      '-mmacosx-version-min=10.5',
-      '-arch', 'i386',
-      '-lstdc++',
-      '-stdlib=libstdc++',
-    ]
-    cxx.cxxflags += ['-stdlib=libstdc++']
-
-  def configure_windows(self, cxx):
-    cxx.defines += ['WIN32', '_WINDOWS']
-	
-  def ConfigureForExtension(self, context, compiler):
-    compiler.cxxincludes += [
+    cxx.cxxincludes += [
       os.path.join(context.currentSourcePath),
-      os.path.join(context.currentSourcePath, 'sdk'),
-      os.path.join(self.sm_root, 'public'),
-      os.path.join(self.sm_root, 'public', 'extensions'),
-      os.path.join(self.sm_root, 'sourcepawn', 'include'),
-      os.path.join(self.sm_root, 'public', 'amtl', 'amtl'),
-      os.path.join(self.sm_root, 'public', 'amtl'),
-    ]
-    return compiler
-
-  def ConfigureForHL2(self, binary, sdk):
-    compiler = binary.compiler
-
-    if sdk.name == 'episode1':
-      mms_path = os.path.join(self.mms_root, 'core-legacy')
-    else:
-      mms_path = os.path.join(self.mms_root, 'core')
-
-    compiler.cxxincludes += [
-      os.path.join(mms_path),
-      os.path.join(mms_path, 'sourcehook'),
+      os.path.join(context.currentSourcePath, 'src'),
+      os.path.join(mms_core_path),
+      os.path.join(mms_core_path, 'sourcehook'),
     ]
 
-    defines = ['SE_' + PossibleSDKs[i].define + '=' + PossibleSDKs[i].code for i in PossibleSDKs]
-    compiler.defines += defines
+    for other_sdk in self.sdk_manifests:
+      cxx.defines += ['SE_{}={}'.format(other_sdk['define'], other_sdk['code'])]
 
-    paths = [
-      ['public'],
-      ['public', 'engine'],
-      ['public', 'mathlib'],
-      ['public', 'vstdlib'],
-      ['public', 'tier0'],
-      ['public', 'tier1']
-    ]
-    if sdk.name == 'episode1' or sdk.name == 'darkm':
-      paths.append(['public', 'dlls'])
-      paths.append(['game_shared'])
-    else:
-      paths.append(['public', 'game', 'server'])
-      paths.append(['public', 'toolframework'])
-      paths.append(['game', 'shared'])
-      paths.append(['common'])
+    if sdk['source2']:
+      cxx.defines += ['META_IS_SOURCE2']
+      binary.sources += [
+        os.path.join(sdk['path'], 'public', 'tier0', 'memoverride.cpp'),
+        os.path.join(sdk['path'], 'tier1', 'convar.cpp'),
+      ]
 
-    compiler.defines += ['SOURCE_ENGINE=' + sdk.code]
+    SdkHelpers.configureCxx(context, binary, sdk)
 
-    if sdk.name in ['sdk2013', 'bms'] and compiler.like('gcc'):
-      # The 2013 SDK already has these in public/tier0/basetypes.h
-      compiler.defines.remove('stricmp=strcasecmp')
-      compiler.defines.remove('_stricmp=strcasecmp')
-      compiler.defines.remove('_snprintf=snprintf')
-      compiler.defines.remove('_vsnprintf=vsnprintf')
-
-    if compiler.like('msvc'):
-      compiler.defines += ['COMPILER_MSVC', 'COMPILER_MSVC32']
-    else:
-      compiler.defines += ['COMPILER_GCC']
-
-    # For everything after Swarm, this needs to be defined for entity networking
-    # to work properly with sendprop value changes.
-    if sdk.name in ['blade', 'insurgency', 'doi', 'csgo']:
-      compiler.defines += ['NETWORK_VARS_ENABLED']
-
-    if sdk.name in ['css', 'hl2dm', 'dods', 'sdk2013', 'bms', 'tf2', 'l4d', 'nucleardawn', 'l4d2']:
-      if builder.target_platform in ['linux', 'mac']:
-        compiler.defines += ['NO_HOOK_MALLOC', 'NO_MALLOC_OVERRIDE']
-
-    if sdk.name == 'csgo' and builder.target_platform == 'linux':
-      compiler.linkflags += ['-lstdc++']
-
-    for path in paths:
-      compiler.cxxincludes += [os.path.join(sdk.path, *path)]
-
-    if builder.target_platform == 'linux':
-      if sdk.name == 'episode1':
-        lib_folder = os.path.join(sdk.path, 'linux_sdk')
-      elif sdk.name in ['sdk2013', 'bms']:
-        lib_folder = os.path.join(sdk.path, 'lib', 'public', 'linux32')
-      else:
-        lib_folder = os.path.join(sdk.path, 'lib', 'linux')
-    elif builder.target_platform == 'mac':
-      if sdk.name in ['sdk2013', 'bms']:
-        lib_folder = os.path.join(sdk.path, 'lib', 'public', 'osx32')
-      else:
-        lib_folder = os.path.join(sdk.path, 'lib', 'mac')
-
-    if builder.target_platform in ['linux', 'mac']:
-      if sdk.name in ['sdk2013', 'bms']:
-        compiler.postlink += [
-          compiler.Dep(os.path.join(lib_folder, 'tier1.a')),
-          compiler.Dep(os.path.join(lib_folder, 'mathlib.a'))
-        ]
-      else:
-        compiler.postlink += [
-          compiler.Dep(os.path.join(lib_folder, 'tier1_i486.a')),
-          compiler.Dep(os.path.join(lib_folder, 'mathlib_i486.a'))
-        ]
-
-      if sdk.name in ['blade', 'insurgency', 'doi', 'csgo']:
-        compiler.postlink += [compiler.Dep(os.path.join(lib_folder, 'interfaces_i486.a'))]
-
-    dynamic_libs = []
-    if builder.target_platform == 'linux':
-      if sdk.name in ['css', 'hl2dm', 'dods', 'tf2', 'sdk2013', 'bms', 'nucleardawn', 'l4d2', 'insurgency', 'doi']:
-        dynamic_libs = ['libtier0_srv.so', 'libvstdlib_srv.so']
-      elif sdk.name in ['l4d', 'blade', 'insurgency', 'doi', 'csgo']:
-        dynamic_libs = ['libtier0.so', 'libvstdlib.so']
-      else:
-        dynamic_libs = ['tier0_i486.so', 'vstdlib_i486.so']
-    elif builder.target_platform == 'mac':
-      compiler.linkflags.append('-liconv')
-      dynamic_libs = ['libtier0.dylib', 'libvstdlib.dylib']
-    elif builder.target_platform == 'windows':
-      libs = ['tier0', 'tier1', 'vstdlib', 'mathlib']
-      if sdk.name in ['swarm', 'blade', 'insurgency', 'doi', 'csgo']:
-        libs.append('interfaces')
-      for lib in libs:
-        lib_path = os.path.join(sdk.path, 'lib', 'public', lib) + '.lib'
-        compiler.linkflags.append(compiler.Dep(lib_path))
-
-    for library in dynamic_libs:
-      source_path = os.path.join(lib_folder, library)
-      output_path = os.path.join(binary.localFolder, library)
-
-      def make_linker(source_path, output_path):
-        def link(context, binary):
-          cmd_node, (output,) = context.AddSymlink(source_path, output_path)
-          return output
-        return link
-
-      linker = make_linker(source_path, output_path)
-      compiler.linkflags[0:0] = [compiler.Dep(library, linker)]
+    cxx.linkflags += additionalLibs(context, binary, sdk)
+    cxx.defines += additionalDefines(context, binary, sdk)
+    cxx.cxxincludes += additionalIncludes(context, binary, sdk)
+    context.AddConfigureFile(os.path.join(context.currentSourcePath, 'plugin-metadata.json'))
 
     return binary
 
-  def HL2Library(self, context, name, sdk):
-    binary = context.compiler.Library(name)
-    self.ConfigureForExtension(context, binary.compiler)
-    return self.ConfigureForHL2(binary, sdk)
+MMSPlugin = MMSPluginConfig()
+MMSPlugin.detectSDKs()
+MMSPlugin.configurePluginMetadata()
+MMSPlugin.configure()
 
-  def HL2Project(self, context, name):
-    project = context.compiler.LibraryProject(name)
-    self.ConfigureForExtension(context, project.compiler)
-    return project
-
-  def HL2Config(self, project, name, sdk):
-    binary = project.Configure(name, '{0} - {1}'.format(self.tag, sdk.name))
-    return self.ConfigureForHL2(binary, sdk)
-
-Extension = ExtensionConfig()
-Extension.detectSDKs()
-Extension.configure()
-
-# Add additional buildscripts here
 BuildScripts = [
   'AMBuilder',
+  'PackageScript',
 ]
 
-if builder.backend == 'amb2':
-  BuildScripts += [
-    'PackageScript',
-  ]
-
-builder.RunBuildScripts(BuildScripts, { 'Extension': Extension})
+builder.Build(BuildScripts, { 'MMSPlugin': MMSPlugin })

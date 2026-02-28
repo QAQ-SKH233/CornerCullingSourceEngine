@@ -1,0 +1,11 @@
+{
+    "name": "culling",
+    "alias": "culling",
+    "display_name": "Culling",
+    "description": "Improved Fog of War - Anti-wallhack occlusion culling for CS2",
+    "author": "Andrew H.",
+    "url": "https://github.com/87andrewh/CornerCullingSourceEngine",
+    "log_tag": "CULLING",
+    "license": "MIT",
+    "version": "2.0.0.{{git-shorthash}}"
+}

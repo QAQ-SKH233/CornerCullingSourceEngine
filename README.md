@@ -1,38 +1,78 @@
 # CornerCullingSourceEngine
 
 ### Introduction
-This is the latest in a long line of occlusion culling / anti-wallhack systems.  
+This is the latest in a long line of occlusion culling / anti-wallhack systems, **now migrated to Counter-Strike 2** using Metamod:Source 2.0.
+
 There are a few features that make this implementation great for competitive Counter-Strike:
 - Open source
-- Good performance (1-2% of frame time for 10 v 10 128-tick Dust2)
+- Good performance (1-2% of frame time for 10 v 10 on Dust2)
 - Strict culling with ray casts
-- Guaranteed to be optimistic (no popping) for players under the latency threshold set in culling.cfg
+- Guaranteed to be optimistic (no popping) for players under the latency threshold
+- Compatible with CS2 via Metamod:Source 2.0 and SwiftlyS2
 
 The main caveat is that occluders are placed manually, so we do not automatically support community maps.  
-I suspect that there are still a few placement errors, which cause players to be invisible, so please submit an issue with a video.  
 All feedback is welcome!
 
+### Requirements
+- Counter-Strike 2 dedicated server
+- [Metamod:Source 2.0](https://github.com/alliedmodders/metamod-source) (commit `176bee4a8debb7625ab82c4059ac518` or later)
+- [HL2SDK (CS2)](https://github.com/alliedmodders/hl2sdk/tree/cs2)
+- [SwiftlyS2](https://github.com/swiftly-solution/swiftlys2) (for plugin-side scripting)
+- [AMBuild](https://github.com/alliedmodders/ambuild) (build system)
+
+### Building
+```bash
+# Set environment variables (or use command-line options)
+export MMSOURCE20=/path/to/metamod-source
+export HL2SDKCS2=/path/to/hl2sdk-cs2
+export HL2SDKMANIFESTS=/path/to/hl2sdk-manifests
+
+# Create build directory
+mkdir build && cd build
+
+# Configure (targets x86_64 by default for CS2)
+python3 ../configure.py --sdks cs2
+
+# Build
+ambuild
+```
+
+Alternatively, use command-line options:
+```bash
+python3 ../configure.py \
+  --mms_path /path/to/metamod-source \
+  --hl2sdk-root /path/to/hl2sdk-root \
+  --hl2sdk-manifests /path/to/hl2sdk-manifests \
+  --sdks cs2
+```
+
 ### Installation
-- Install SourceMod  
-- Drag the contents of "InstallThis" into csgo-ds/csgo  
+1. Build the plugin (see above) or download pre-built binaries
+2. Copy the packaged output to your CS2 server's `game/csgo/` directory:
+   ```
+   game/csgo/addons/culling/          # Plugin binary
+   game/csgo/addons/metamod/culling.vdf  # Metamod VDF
+   ```
+3. Copy the map culling data files to `game/csgo/maps/`:
+   ```
+   game/csgo/maps/culling_de_dust2.txt
+   game/csgo/maps/culling_de_mirage.txt
+   ...
+   ```
+4. Install Metamod:Source 2.0 if not already installed
+5. Restart the server
 
 ### Adding Occluders to Custom Maps
-- Note: This process can be quite laborious. If you have many complex custom maps, I reccomend using a different anti-wallhack.
-- Create a file for your custum map, csgo/maps/culling_<MAPNAME>.txt
+- Create a file for your custom map: `game/csgo/maps/culling_<MAPNAME>.txt`
   - To prevent crashes, you may need a placeholder occluder (AABB from 0 0 0 to 1 1 1) until you add more
-- Compile and install culling_editor.sp
-  - To prevent your CS:GO client from crashing, you may have to unload culling_editor until after your client joins
-  - The editor attemps to display the top-most occluder, although it may miss edges if vertices are inside the map
-  - Print the coordinates of a point to console by looking at it and attacking. You must be client #1
 - An axis-aligned bounding box is declared by "AABB" and defined by the coordinates of two opposite vertices
-- A cuboid is declared by "cuboid" and defined by
+- A cuboid is declared by "cuboid" and defined by:
   - offset
   - scale
   - rotation
   - 8 vertices in the order below
 - A cuboid is usually best defined with 8 raw vertex coordinates, "0 0 0" offset, "1 1 1" scale, and "0 0 0" rotation
 - The user must ensure that the vertices of a cuboid's faces are coplanar. Failure will cause undefined behavior
-- You can loosely check your work with "r_drawothermodels 2"; however, it is not as rigorous as testing with a real wallhack
 
 ```  
    .1------0
@@ -44,23 +84,24 @@ All feedback is welcome!
 6------7'
 ```
 
-### Issue Log
-- Mirage sandwich (Probably fixed 10/24/20)
+### Migration Notes (CS:GO → CS2)
+- **Build system**: Migrated from SourceMod AMBuild to Metamod:Source 2.0 AMBuild
+- **Architecture**: Changed from 32-bit to 64-bit (CS2 is 64-bit only)
+- **Plugin framework**: Replaced SourceMod extension with standalone Metamod:Source 2.0 plugin
+- **Plugin scripting**: SwiftlyS2 replaces SourcePawn for plugin-side scripting
+- **Map paths**: Changed from `csgo/maps/` to `game/csgo/maps/`
+- **C++ standard**: Upgraded from C++14 to C++17
+- **Tick rate**: Default changed from 128 to 64 (CS2 default)
 
 ### Experimental
 - Automatic mesh generation for an alternative occlusion culling algorithm
 - While the mesh generation is mostly fine, save for a few transparency issues, the necessary triangle intersection and other integration code will take a fair bit of work.
-- Also, you may wonder why I made the seemingly insane decision to use the Source ray tracing system to generate my own mesh to feed into my own ray tracing system. The reason is that one needs to "relax" the mesh to guarantee correctness. Consider peeking through a 1-pixel gap in mid doors. A ray trace against the in-game mesh cannot check every pixel every frame. You have to relax the mesh by pushing every vertex inward--by a distance determined by the resolution of the player bounding mesh that you trace against.
-- However, in a non-tournament setting, this edge case shouldn't matter. I don't think it even matters for a platform like FACEIT. Also, there are a few community anti-wallhacks that operate with the Source ray tracing system, but the ones I'm aware of cost money. I hope I will eventually find a few weeks to finish my mesh system or fix SMAC. 
-![](scan_cbbl.png)
 
 ### Future Work
 - Polish lookahead logic  
 - Find and fill "missed spots" in maps  
 - Calculate lookahead with velocity instead of speed  
-- Update automatically (perhaps https://forums.alliedmods.net/showthread.php?t=169095)  
 - Join occluders, preventing "leaks" through thin corners  
-- Anti-anti-flash  
 - Smoke occlusion  
 
 ### Technical details
