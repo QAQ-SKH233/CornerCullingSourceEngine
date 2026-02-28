@@ -147,14 +147,15 @@ inline Cuboid CuboidFromFaces(std::ifstream& input)
 }
 
 // Returns a list of cuboid vertices from a text representation in a file
-inline std::vector<Cuboid> FileToCuboids(char* mapName)
+inline std::vector<Cuboid> FileToCuboids(const char* mapName)
 {
     std::vector<Cuboid> cuboids;
 
-    char fileName[128];
-    strncpy(fileName, "csgo/maps/culling_", 20);
-    strncat(fileName, mapName, 60);
-    strncat(fileName, ".txt", 10);
+    char fileName[256];
+    strncpy(fileName, "game/csgo/maps/culling_", sizeof(fileName) - 1);
+    fileName[sizeof(fileName) - 1] = '\0';
+    strncat(fileName, mapName, sizeof(fileName) - strlen(fileName) - 1);
+    strncat(fileName, ".txt", sizeof(fileName) - strlen(fileName) - 1);
 
     std::ifstream in;
     in.open(fileName);
@@ -201,7 +202,7 @@ inline std::vector<Cuboid> FileToCuboids(char* mapName)
 }
 
 // Returns a list of cuboid vertices from a text representation in a file
-inline std::vector<vec3> GetFirstCuboidVertices(char* mapName)
+inline std::vector<vec3> GetFirstCuboidVertices(const char* mapName)
 {
     auto empty = std::vector<vec3> {
         vec3(1, 1, 1),
@@ -214,10 +215,11 @@ inline std::vector<vec3> GetFirstCuboidVertices(char* mapName)
         vec3(1, 0, 0),
     };
 
-    char fileName[128];
-    strncpy(fileName, "csgo/maps/culling_", 20);
-    strncat(fileName, mapName, 60);
-    strncat(fileName, ".txt", 10);
+    char fileName[256];
+    strncpy(fileName, "game/csgo/maps/culling_", sizeof(fileName) - 1);
+    fileName[sizeof(fileName) - 1] = '\0';
+    strncat(fileName, mapName, sizeof(fileName) - strlen(fileName) - 1);
+    strncat(fileName, ".txt", sizeof(fileName) - strlen(fileName) - 1);
 
     std::ifstream in;
     in.open(fileName);

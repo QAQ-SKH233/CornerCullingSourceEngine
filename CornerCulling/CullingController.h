@@ -102,15 +102,15 @@ class CullingController
     bool sameTeam(int i, int j);
 
 public:
-    char* MapName = "";
+    char MapName[128] = "";
     // Server tick rate.
-    int tickRate = 128;
+    int tickRate = 64;
     // Culling system maximum lookahead (millisceonds).
     // A low value enforces strict culling, but lag may cause popping.
     // A high value will grant a greater advantage to wallhackers.
     int maxLookahead = 110;
     CullingController();
-    void BeginPlay(char* mapName);
+    void BeginPlay(const char* mapName);
     void Tick();
     // Returns if player i can see player j
     bool IsVisible(int i, int j);

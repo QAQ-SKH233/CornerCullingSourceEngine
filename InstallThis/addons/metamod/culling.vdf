@@ -1,0 +1,5 @@
+"Metamod Plugin"
+{
+	"alias"	"culling"
+	"file"	"addons/culling/bin/linuxsteamrt64/culling"
+}
