@@ -169,11 +169,6 @@ class MMSPluginConfig(object):
       self.configureCxx(cxx)
 
   def addVersioning(self, cxx):
-    if cxx.target.arch == 'x86_64':
-      target_suffix = '64'
-    else:
-      target_suffix = ''
-
     (direct_head, git_head_path) = getGitHeadPath()
 
     defines = {
@@ -198,12 +193,10 @@ class MMSPluginConfig(object):
     for name, value in defines.items():
       header_text += '#define {} "{}"\n'.format(name, value)
 
-    version_gen = builder.AddOutputFile(
-      os.path.join('src', 'version_gen{}.h'.format(target_suffix)),
-      header_text.encode('utf8')
-    )
-
-    self.version_header_deps += [version_gen]
+    version_gen_dir = os.path.join(builder.buildPath, 'src')
+    os.makedirs(version_gen_dir, exist_ok=True)
+    with open(os.path.join(version_gen_dir, 'version_gen.h'), 'w') as f:
+      f.write(header_text)
 
   def configureCxx(self, cxx):
     if cxx.behavior == 'gcc':
@@ -340,6 +333,7 @@ class MMSPluginConfig(object):
     cxx.cxxincludes += [
       os.path.join(context.currentSourcePath),
       os.path.join(context.currentSourcePath, 'src'),
+      os.path.join(context.buildPath, 'src'),
       os.path.join(mms_core_path),
       os.path.join(mms_core_path, 'sourcehook'),
     ]
