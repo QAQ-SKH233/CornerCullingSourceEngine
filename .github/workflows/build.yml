@@ -1,0 +1,140 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os_short }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            os_short: linux
+            target_arch: x86_64
+
+    env:
+      SDKS: cs2
+      MMSOURCE20: ${{ github.workspace }}/alliedmodders/metamod-source
+      HL2SDKCS2: ${{ github.workspace }}/alliedmodders/hl2sdk-cs2
+      HL2SDKMANIFESTS: ${{ github.workspace }}/alliedmodders/metamod-source/hl2sdk-manifests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            clang g++ gcc-multilib g++-multilib \
+            libstdc++6 lib32stdc++6 \
+            libc6-dev libc6-dev-i386 linux-libc-dev \
+            linux-libc-dev:i386 lib32z1-dev
+
+      - name: Install AMBuild
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          git clone https://github.com/alliedmodders/ambuild.git /tmp/ambuild
+          pip install /tmp/ambuild
+
+      - name: Checkout Metamod:Source
+        run: |
+          mkdir -p ${{ github.workspace }}/alliedmodders
+          cd ${{ github.workspace }}/alliedmodders
+          git clone --recursive --branch master --single-branch \
+            https://github.com/alliedmodders/metamod-source.git
+
+      - name: Checkout HL2SDK (CS2)
+        run: |
+          cd ${{ github.workspace }}/alliedmodders
+          git clone --recursive --branch cs2 --single-branch \
+            https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
+
+      - name: Configure
+        run: |
+          mkdir -p build && cd build
+          CC=clang CXX=clang++ python ../configure.py \
+            -s cs2 \
+            --targets ${{ matrix.target_arch }} \
+            --enable-optimize \
+            --mms_path="${{ env.MMSOURCE20 }}" \
+            --hl2sdk-root="${{ github.workspace }}/alliedmodders" \
+            --hl2sdk-manifests="${{ env.HL2SDKMANIFESTS }}"
+
+      - name: Build
+        run: |
+          cd build
+          ambuild
+
+      - name: Verify build output
+        run: |
+          echo "=== Build output ==="
+          find build/package -type f | sort
+          echo ""
+          echo "=== Checking for plugin binary ==="
+          find build/package -name "culling*" -type f
+          echo ""
+          echo "=== Checking for VDF ==="
+          find build/package -name "*.vdf" -type f
+
+      - name: Package artifacts
+        run: |
+          cd build/package
+          # Find the SDK directory (e.g., cs2/)
+          SDK_DIR=$(ls -d */ | head -1)
+          echo "SDK_DIR=$SDK_DIR"
+          cd "$SDK_DIR"
+          tar czf "${{ github.workspace }}/culling-${{ matrix.os_short }}.tar.gz" addons/
+          echo "=== Package contents ==="
+          tar tzf "${{ github.workspace }}/culling-${{ matrix.os_short }}.tar.gz"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: culling-${{ matrix.os_short }}
+          path: culling-${{ matrix.os_short }}.tar.gz
+
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4.1.7
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts/ -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
