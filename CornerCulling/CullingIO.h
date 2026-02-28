@@ -152,10 +152,7 @@ inline std::vector<Cuboid> FileToCuboids(const char* mapName)
     std::vector<Cuboid> cuboids;
 
     char fileName[256];
-    strncpy(fileName, "game/csgo/maps/culling_", sizeof(fileName) - 1);
-    fileName[sizeof(fileName) - 1] = '\0';
-    strncat(fileName, mapName, sizeof(fileName) - strlen(fileName) - 1);
-    strncat(fileName, ".txt", sizeof(fileName) - strlen(fileName) - 1);
+    snprintf(fileName, sizeof(fileName), "game/csgo/maps/culling_%s.txt", mapName);
 
     std::ifstream in;
     in.open(fileName);
@@ -216,10 +213,7 @@ inline std::vector<vec3> GetFirstCuboidVertices(const char* mapName)
     };
 
     char fileName[256];
-    strncpy(fileName, "game/csgo/maps/culling_", sizeof(fileName) - 1);
-    fileName[sizeof(fileName) - 1] = '\0';
-    strncat(fileName, mapName, sizeof(fileName) - strlen(fileName) - 1);
-    strncat(fileName, ".txt", sizeof(fileName) - strlen(fileName) - 1);
+    snprintf(fileName, sizeof(fileName), "game/csgo/maps/culling_%s.txt", mapName);
 
     std::ifstream in;
     in.open(fileName);
