@@ -193,12 +193,10 @@ class MMSPluginConfig(object):
     for name, value in defines.items():
       header_text += '#define {} "{}"\n'.format(name, value)
 
-    version_gen = builder.AddOutputFile(
-      os.path.join('src', 'version_gen.h'),
-      header_text.encode('utf8')
-    )
-
-    self.version_header_deps += [version_gen]
+    version_gen_dir = os.path.join(builder.buildPath, 'src')
+    os.makedirs(version_gen_dir, exist_ok=True)
+    with open(os.path.join(version_gen_dir, 'version_gen.h'), 'w') as f:
+      f.write(header_text)
 
   def configureCxx(self, cxx):
     if cxx.behavior == 'gcc':
