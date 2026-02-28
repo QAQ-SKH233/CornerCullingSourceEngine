@@ -113,7 +113,7 @@ void CullingPlugin::UpdateCullingMap(const char *pMapName)
 	int tickRate = 64; // CS2 default tick rate
 	if (globals)
 	{
-		float interval = globals->interval_per_tick;
+		float interval = globals->m_flIntervalPerTick;
 		if (interval > 0)
 			tickRate = (int)(1.0f / interval + 0.5f);
 	}
